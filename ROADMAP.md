@@ -62,7 +62,7 @@ Tujuan: membuktikan pipeline gambar → SVG jalan di browser.
 ### Fase 2 — MVP yang Bisa Dipakai (± 2–3 sesi) 🚧
 Tujuan: alur lengkap yang nyaman untuk pengguna awam.
 - [x] Upload via drag-and-drop, file picker, dan paste dari clipboard.
-- [ ] Preview berdampingan **sebelum/sesudah** dengan zoom & pan. *(berdampingan ✅, zoom & pan belum)*
+- [x] Preview berdampingan **sebelum/sesudah** dengan zoom & pan (modal compare + slider pembatas).
 - [x] Panel pengaturan dasar: jumlah warna, detail/smoothing, mode (warna / hitam-putih).
 - [x] Re-trace otomatis (debounced) saat pengaturan berubah.
 - [x] Download SVG + salin kode SVG ke clipboard.
@@ -73,12 +73,12 @@ Tujuan: alur lengkap yang nyaman untuk pengguna awam.
 
 ### Fase 3 — Kualitas Hasil & Fitur Lanjutan (± 2–3 sesi)
 Tujuan: dari "jalan" menjadi "bagus".
-- [ ] Preset sekali-klik: **Logo**, **Sketsa/Line-art**, **Ilustrasi**, **Foto (poster)**.
-- [ ] Pra-pemrosesan: kuantisasi warna, denoise ringan, opsi hapus background warna solid.
-- [ ] Optimasi output SVG (SVGO): ukuran file kecil, path digabung per warna.
+- [x] Preset sekali-klik: **Logo**, **Sketsa/Line-art**, **Ilustrasi**, **Foto (poster)**.
+- [x] Pra-pemrosesan: opsi hapus background warna solid dengan toleransi. *(kuantisasi & denoise via setting smoothing/warna)*
+- [ ] Optimasi output SVG (SVGO): ukuran file kecil, path digabung per warna. *(path transparan sudah dibuang otomatis)*
 - [x] Batch: beberapa gambar sekaligus → download ZIP. *(dimajukan atas permintaan — selesai lebih awal)*
-- [ ] Ekspor tambahan: PNG hasil render ulang pada resolusi berapa pun.
-- [ ] Perbandingan ukuran file & jumlah path di UI.
+- [x] Ekspor tambahan: PNG hasil render ulang pada resolusi berapa pun (1×–8×).
+- [x] Perbandingan ukuran file & jumlah path di UI.
 
 ### Fase 4 — Poles & Rilis 1.0 (± 1–2 sesi)
 - [ ] Responsif penuh (mobile), dark mode, aksesibilitas dasar (keyboard, kontras).
