@@ -75,7 +75,7 @@ Tujuan: alur lengkap yang nyaman untuk pengguna awam.
 Tujuan: dari "jalan" menjadi "bagus".
 - [x] Preset sekali-klik: **Logo**, **Sketsa/Line-art**, **Ilustrasi**, **Foto (poster)**.
 - [x] Pra-pemrosesan: opsi hapus background warna solid dengan toleransi. *(kuantisasi & denoise via setting smoothing/warna)*
-- [ ] Optimasi output SVG (SVGO): ukuran file kecil, path digabung per warna. *(path transparan sudah dibuang otomatis)*
+- [x] Optimasi output SVG: path digabung per warna menjadi layer `<g>` bernama (1 warna = 1 shape), path transparan/putih dibuang, garis dihaluskan (linefilter).
 - [x] Batch: beberapa gambar sekaligus → download ZIP. *(dimajukan atas permintaan — selesai lebih awal)*
 - [x] Ekspor tambahan: PNG hasil render ulang pada resolusi berapa pun (1×–8×).
 - [x] Perbandingan ukuran file & jumlah path di UI.
