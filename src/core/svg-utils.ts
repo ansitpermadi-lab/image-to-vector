@@ -53,13 +53,20 @@ export function recolorSvg(svg: string, from: string, toHex: string): string {
   return svg.split(`"${from}"`).join(`"${to}"`);
 }
 
-/** Terapkan beberapa penggantian warna sekaligus ({ "rgb(..)": "#hex" }). */
+/**
+ * Terapkan beberapa penggantian warna sekaligus ({ "rgb(..)": "#hex" }).
+ * SATU PASS: setiap fill/stroke dievaluasi tepat sekali terhadap mapping,
+ * jadi hasil penggantian satu warna tidak bisa ikut tertimpa penggantian
+ * warna lain (mis. tukar warna dua layer tetap benar, tidak berantai).
+ */
 export function applyRecolors(svg: string, mapping: Record<string, string>): string {
-  let out = svg;
-  for (const [from, toHex] of Object.entries(mapping)) {
-    out = recolorSvg(out, from, toHex);
-  }
-  return out;
+  if (Object.keys(mapping).length === 0) return svg;
+  const resolved: Record<string, string> = {};
+  for (const [from, toHex] of Object.entries(mapping)) resolved[from] = hexToRgb(toHex);
+  return svg.replace(
+    /(fill|stroke)="(rgb\(\d+,\d+,\d+\))"/g,
+    (_, attr, rgb) => `${attr}="${resolved[rgb] ?? rgb}"`,
+  );
 }
 
 /**
@@ -142,12 +149,17 @@ function rdp(points: Array<[number, number]>, epsilon: number): Array<[number, n
     const [bx, by] = points[b];
     const dx = bx - ax;
     const dy = by - ay;
-    const len = Math.hypot(dx, dy) || 1e-12;
+    const len = Math.hypot(dx, dy);
+    // Chord degenerat (titik awal == akhir, umum pada ring tertutup imagetracer):
+    // ukur jarak Euclidean ke titik awal, bukan jarak-ke-garis yang selalu 0 —
+    // tanpa ini seluruh subpath tertutup kolaps jadi satu titik lalu lenyap.
+    const degenerate = len < 1e-9;
     let maxDist = 0;
     let maxIdx = -1;
     for (let i = a + 1; i < b; i++) {
-      const dist =
-        Math.abs(dy * points[i][0] - dx * points[i][1] + bx * ay - by * ax) / len;
+      const dist = degenerate
+        ? Math.hypot(points[i][0] - ax, points[i][1] - ay)
+        : Math.abs(dy * points[i][0] - dx * points[i][1] + bx * ay - by * ax) / len;
       if (dist > maxDist) {
         maxDist = dist;
         maxIdx = i;
@@ -249,11 +261,15 @@ export interface LayerInfo {
   anchors: number;
 }
 
-/** Daftar layer <g> hasil mergePathsByColor, urut sesuai dokumen. */
+/**
+ * Daftar layer <g> hasil mergePathsByColor, urut sesuai dokumen. Regex
+ * membolehkan atribut lain (mis. display="none") di antara id dan data-name,
+ * jadi layer yang sedang disembunyikan tetap muncul di daftar.
+ */
 export function listLayers(svg: string): LayerInfo[] {
   return [
     ...svg.matchAll(
-      /<g id="(layer-\d+)" data-name="([^"]+)"[^>]*><path[^>]*fill="([^"]+)"[^>]*d="([^"]+)"/g,
+      /<g id="(layer-\d+)"[^>]*?data-name="([^"]+)"[^>]*><path[^>]*fill="([^"]+)"[^>]*d="([^"]+)"/g,
     ),
   ].map((m) => ({
     id: m[1],
@@ -263,13 +279,18 @@ export function listLayers(svg: string): LayerInfo[] {
   }));
 }
 
-/** Sembunyikan layer tertentu (display="none") tanpa membuang datanya. */
+/**
+ * Sembunyikan layer tertentu (display="none") tanpa membuang datanya.
+ * Idempoten: id yang sudah tersembunyi tidak ditambahi atribut ganda, dan
+ * setiap panggilan lebih dulu membuang semua display="none" lama — jadi
+ * daftar hiddenIds adalah sumber kebenaran (bisa dipakai untuk unhide juga).
+ */
 export function setLayerVisibility(svg: string, hiddenIds: string[]): string {
-  let out = svg;
-  for (const id of hiddenIds) {
-    out = out.replace(`<g id="${id}"`, `<g id="${id}" display="none"`);
-  }
-  return out;
+  const clean = svg.replace(/(<g id="layer-\d+")\s+display="none"/g, "$1");
+  const wanted = new Set(hiddenIds);
+  return clean.replace(/<g id="(layer-\d+)"/g, (match, id) =>
+    wanted.has(id) ? `<g id="${id}" display="none"` : match,
+  );
 }
 
 /** Perkiraan jumlah titik jangkar: jumlah segmen garis + kurva pada semua path. */

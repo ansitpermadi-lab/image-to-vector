@@ -204,6 +204,47 @@ describe("svg-utils", () => {
     expect(setLayerVisibility(merged, [])).toBe(merged);
   });
 
+  it("REGRESI: subpath tertutup (start==end) tidak lenyap saat disederhanakan", () => {
+    // imagetracer menutup ring dengan mengulang titik awal sebagai L terakhir.
+    const square = "M 6 6 L 18 6 L 18 18 L 6 18 L 6 6 Z";
+    const out = simplifyPathD(square, 0.75);
+    expect(out).toContain("L 18 6");
+    expect(out).toContain("L 18 18");
+    expect(out).toContain("L 6 18");
+    // keempat sudut bertahan → bukan "M 6 6 L 6 6 Z".
+    expect((out.match(/L /g) ?? []).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("REGRESI: tukar warna dua layer tidak berantai (single-pass)", () => {
+    const doc =
+      '<path fill="rgb(255,0,0)" stroke="rgb(255,0,0)" d="M0 0" />' +
+      '<path fill="rgb(0,0,255)" stroke="rgb(0,0,255)" d="M1 1" />';
+    // layer merah → biru (warna asli layer lain), layer biru → hijau.
+    const out = applyRecolors(doc, {
+      "rgb(255,0,0)": "#0000ff",
+      "rgb(0,0,255)": "#00ff00",
+    });
+    const fills = [...out.matchAll(/fill="([^"]+)"/g)].map((m) => m[1]);
+    expect(fills).toEqual(["rgb(0,0,255)", "rgb(0,255,0)"]); // bukan dua-duanya hijau
+  });
+
+  it("REGRESI: setLayerVisibility idempoten & bisa unhide", () => {
+    const svg = '<g id="layer-1" data-name="#000"><path /></g><g id="layer-2" data-name="#fff"><path /></g>';
+    const once = setLayerVisibility(svg, ["layer-1"]);
+    const twice = setLayerVisibility(once, ["layer-1"]);
+    expect(twice).toBe(once); // tidak ada display="none" ganda
+    expect((twice.match(/display="none"/g) ?? []).length).toBe(1);
+    // hiddenIds jadi sumber kebenaran: kosong = semua tampil lagi.
+    expect(setLayerVisibility(once, [])).toBe(svg);
+  });
+
+  it("REGRESI: listLayers tetap melihat layer yang disembunyikan", () => {
+    const merged = mergePathsByColor(SAMPLE_SVG);
+    const hidden = setLayerVisibility(merged, ["layer-1"]);
+    expect(listLayers(hidden)).toHaveLength(3); // layer-1 tidak hilang dari daftar
+    expect(listLayers(hidden)[0].id).toBe("layer-1");
+  });
+
   it("stripWhitePaths membuang path putih saja", () => {
     const out = stripWhitePaths(SAMPLE_SVG);
     expect(out).not.toContain("rgb(255,255,255)");
