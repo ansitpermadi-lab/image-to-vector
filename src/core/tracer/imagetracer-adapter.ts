@@ -1,4 +1,5 @@
 import ImageTracer, { type ImageTracerOptions } from "imagetracerjs";
+import { binarize, grayPalette, toGrayscale } from "@/core/preprocess/tone";
 import {
   DEFAULT_TRACE_OPTIONS,
   type TraceInput,
@@ -11,8 +12,8 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * Memetakan opsi tingkat-produk (detail 0–1, smoothing 0–1) ke parameter
- * mentah ImageTracer (threshold, pathomit, blur).
+ * Memetakan opsi tingkat-produk (detail 0–1, smoothing 0–1, noise px) ke
+ * parameter mentah ImageTracer (threshold kurva, pathomit, blur).
  */
 export function toImageTracerOptions(options: TraceOptions): ImageTracerOptions {
   const detail = clamp(options.detail, 0, 1);
@@ -23,8 +24,8 @@ export function toImageTracerOptions(options: TraceOptions): ImageTracerOptions 
   const base: ImageTracerOptions = {
     ltres: threshold,
     qtres: threshold,
-    pathomit: Math.round(4 + (1 - detail) * 16),
-    rightangleenhance: true,
+    pathomit: Math.round(clamp(options.noise, 0, 100)),
+    rightangleenhance: options.corners,
     colorquantcycles: 3,
     blurradius: smoothing * 5,
     blurdelta: 20,
@@ -47,6 +48,16 @@ export function toImageTracerOptions(options: TraceOptions): ImageTracerOptions 
     };
   }
 
+  if (options.mode === "grayscale") {
+    const levels = clamp(Math.round(options.colorCount), 2, 64);
+    return {
+      ...base,
+      colorsampling: 0,
+      numberofcolors: levels,
+      pal: grayPalette(levels),
+    };
+  }
+
   return {
     ...base,
     colorsampling: 2,
@@ -59,17 +70,35 @@ export function stripInvisiblePaths(svg: string): string {
   return svg.replace(/<path[^>]*\sopacity="0(\.0+)?"[^>]*\/>\s*/g, "");
 }
 
+/** Buang path putih/hampir putih — padanan "Ignore White" di Illustrator. */
+export function stripWhitePaths(svg: string, minChannel = 250): string {
+  return svg.replace(
+    /<path[^>]*\sfill="rgb\((\d+),(\d+),(\d+)\)"[^>]*\/>\s*/g,
+    (match, r, g, b) =>
+      Number(r) >= minChannel && Number(g) >= minChannel && Number(b) >= minChannel
+        ? ""
+        : match,
+  );
+}
+
 export function traceImageData(
   input: TraceInput,
   options: TraceOptions = DEFAULT_TRACE_OPTIONS,
 ): TraceResult {
   const start = performance.now();
-  const svg = stripInvisiblePaths(
+
+  let prepared = input;
+  if (options.mode === "grayscale") prepared = toGrayscale(input);
+  else if (options.mode === "bw") prepared = binarize(input, options.threshold);
+
+  let svg = stripInvisiblePaths(
     ImageTracer.imagedataToSVG(
-      { width: input.width, height: input.height, data: input.data },
+      { width: prepared.width, height: prepared.height, data: prepared.data },
       toImageTracerOptions(options),
     ),
   );
+  if (options.ignoreWhite) svg = stripWhitePaths(svg);
+
   return {
     svg,
     width: input.width,

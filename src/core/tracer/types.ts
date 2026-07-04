@@ -1,13 +1,21 @@
-export type TraceMode = "color" | "bw";
+export type TraceMode = "color" | "grayscale" | "bw";
 
 export interface TraceOptions {
   mode: TraceMode;
-  /** Jumlah warna pada hasil (2–64). Diabaikan pada mode "bw". */
+  /** Jumlah warna pada hasil (2–64). Untuk grayscale = jumlah tingkat abu. Diabaikan pada "bw". */
   colorCount: number;
-  /** 0–1; makin tinggi makin banyak detail (dan makin banyak path). */
+  /** 0–1; makin tinggi makin banyak detail (kurva mengikuti piksel lebih ketat). */
   detail: number;
-  /** 0–1; blur ringan sebelum tracing untuk meredam noise. */
+  /** 0–1; blur ringan sebelum tracing untuk meredam noise halus. */
   smoothing: number;
+  /** 0–1; ambang terang/gelap untuk mode "bw" (0.5 = tengah). */
+  threshold: number;
+  /** Area minimum dalam piksel; bercak lebih kecil dari ini diabaikan (Noise di Illustrator). */
+  noise: number;
+  /** Pertegas sudut 90° (Corners di Illustrator). */
+  corners: boolean;
+  /** Buang path putih/hampir putih dari hasil (Ignore White di Illustrator). */
+  ignoreWhite: boolean;
   /** Jadikan warna latar (dideteksi dari sudut gambar) transparan sebelum tracing. */
   removeBg: boolean;
   /** 0–1; seberapa jauh warna boleh menyimpang dari warna latar dan tetap dihapus. */
@@ -19,6 +27,10 @@ export const DEFAULT_TRACE_OPTIONS: TraceOptions = {
   colorCount: 16,
   detail: 0.7,
   smoothing: 0,
+  threshold: 0.5,
+  noise: 8,
+  corners: true,
+  ignoreWhite: false,
   removeBg: false,
   bgTolerance: 0.12,
 };

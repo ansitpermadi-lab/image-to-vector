@@ -54,7 +54,12 @@ describe("toImageTracerOptions", () => {
     const detailed = toImageTracerOptions({ ...DEFAULT_TRACE_OPTIONS, detail: 1 });
     const rough = toImageTracerOptions({ ...DEFAULT_TRACE_OPTIONS, detail: 0 });
     expect(detailed.ltres!).toBeLessThan(rough.ltres!);
-    expect(detailed.pathomit!).toBeLessThan(rough.pathomit!);
+  });
+
+  it("noise dipetakan langsung ke pathomit", () => {
+    expect(
+      toImageTracerOptions({ ...DEFAULT_TRACE_OPTIONS, noise: 20 }).pathomit,
+    ).toBe(20);
   });
 
   it("meng-clamp jumlah warna ke rentang 2–64", () => {

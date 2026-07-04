@@ -28,6 +28,8 @@ interface BatchItem {
   wasResized: boolean;
   status: ItemStatus;
   result: TraceResult | null;
+  /** SVG dengan warna yang sudah diganti pengguna (null = pakai hasil asli). */
+  editedSvg: string | null;
   error: string | null;
 }
 
@@ -56,6 +58,7 @@ async function fileToItem(file: File): Promise<BatchItem> {
     wasResized: scale < 1,
     status: "queued",
     result: null,
+    editedSvg: null,
     error: null,
   };
 }
@@ -98,7 +101,8 @@ export default function Home() {
         prev.map((item) => {
           if (stale || item.id !== itemId) return item;
           return event.data.ok
-            ? { ...item, status: "done", result: event.data.result, error: null }
+            ? // Hasil baru membatalkan recolor lama (paletnya bisa berbeda).
+              { ...item, status: "done", result: event.data.result, editedSvg: null, error: null }
             : { ...item, status: "error", error: event.data.error, result: null };
         }),
       );
@@ -187,10 +191,12 @@ export default function Home() {
     setError(null);
   };
 
+  const itemSvg = (item: BatchItem) => item.editedSvg ?? item.result?.svg ?? "";
+
   const downloadItem = (item: BatchItem) => {
     if (!item.result) return;
     downloadBlob(
-      new Blob([item.result.svg], { type: "image/svg+xml" }),
+      new Blob([itemSvg(item)], { type: "image/svg+xml" }),
       `${baseName(item.name)}.svg`,
     );
   };
@@ -207,7 +213,7 @@ export default function Home() {
         let filename = `${base}.svg`;
         for (let n = 2; used.has(filename); n++) filename = `${base}-${n}.svg`;
         used.add(filename);
-        zip.file(filename, item.result!.svg);
+        zip.file(filename, itemSvg(item));
       }
       downloadBlob(await zip.generateAsync({ type: "blob" }), "vektor.zip");
     } finally {
@@ -306,7 +312,7 @@ export default function Home() {
             )}
           </section>
 
-          <section className="mb-6 grid gap-4 rounded-xl border border-gray-400/30 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <section className="mb-6 grid gap-4 rounded-xl border border-gray-400/30 p-4 sm:grid-cols-2 lg:grid-cols-4">
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium">Mode</span>
               <select
@@ -317,12 +323,14 @@ export default function Home() {
                 className="rounded-md border border-gray-400/40 bg-transparent px-2 py-1.5"
               >
                 <option value="color">Warna</option>
+                <option value="grayscale">Abu-abu (grayscale)</option>
                 <option value="bw">Hitam-putih</option>
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium">
-                Jumlah warna: {options.mode === "bw" ? 2 : options.colorCount}
+                {options.mode === "grayscale" ? "Tingkat abu" : "Jumlah warna"}:{" "}
+                {options.mode === "bw" ? 2 : options.colorCount}
               </span>
               <input
                 type="range"
@@ -332,6 +340,33 @@ export default function Home() {
                 disabled={options.mode === "bw"}
                 onChange={(e) =>
                   setOptions({ ...options, colorCount: Number(e.target.value) })
+                }
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">
+                Threshold B/W: {Math.round(options.threshold * 100)}%
+              </span>
+              <input
+                type="range"
+                min={5}
+                max={95}
+                value={Math.round(options.threshold * 100)}
+                disabled={options.mode !== "bw"}
+                onChange={(e) =>
+                  setOptions({ ...options, threshold: Number(e.target.value) / 100 })
+                }
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">Noise: {options.noise} px</span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={options.noise}
+                onChange={(e) =>
+                  setOptions({ ...options, noise: Number(e.target.value) })
                 }
               />
             </label>
@@ -360,6 +395,33 @@ export default function Home() {
                   setOptions({ ...options, smoothing: Number(e.target.value) / 100 })
                 }
               />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">Opsi tepi & warna</span>
+              <span className="flex flex-col gap-1.5 py-1">
+                <span className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={options.corners}
+                    onChange={(e) =>
+                      setOptions({ ...options, corners: e.target.checked })
+                    }
+                    className="h-4 w-4 accent-blue-600"
+                  />
+                  <span className="text-xs opacity-70">pertegas sudut 90°</span>
+                </span>
+                <span className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={options.ignoreWhite}
+                    onChange={(e) =>
+                      setOptions({ ...options, ignoreWhite: e.target.checked })
+                    }
+                    className="h-4 w-4 accent-blue-600"
+                  />
+                  <span className="text-xs opacity-70">abaikan putih (ignore white)</span>
+                </span>
+              </span>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium">Hapus background</span>
@@ -457,7 +519,7 @@ export default function Home() {
                     {item.result ? (
                       <span
                         className="flex h-full w-full items-center justify-center"
-                        dangerouslySetInnerHTML={{ __html: item.result.svg }}
+                        dangerouslySetInnerHTML={{ __html: itemSvg(item) }}
                       />
                     ) : (
                       <span className="text-xs opacity-50">
@@ -506,6 +568,14 @@ export default function Home() {
           name={viewItem.name}
           previewUrl={viewItem.previewUrl}
           result={viewItem.result}
+          editedSvg={viewItem.editedSvg}
+          onEdited={(svg) =>
+            setItems((prev) =>
+              prev.map((item) =>
+                item.id === viewItem.id ? { ...item, editedSvg: svg } : item,
+              ),
+            )
+          }
           onClose={() => setViewItemId(null)}
         />
       )}
