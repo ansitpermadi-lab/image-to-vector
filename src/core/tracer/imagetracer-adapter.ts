@@ -1,5 +1,6 @@
 import ImageTracer, { type ImageTracerOptions } from "imagetracerjs";
 import { binarize, grayPalette, toGrayscale } from "@/core/preprocess/tone";
+import { mergePathsByColor } from "@/core/svg-utils";
 import {
   DEFAULT_TRACE_OPTIONS,
   type TraceInput,
@@ -30,6 +31,7 @@ export function toImageTracerOptions(options: TraceOptions): ImageTracerOptions 
     blurradius: smoothing * 5,
     blurdelta: 20,
     strokewidth: 1,
+    linefilter: true,
     roundcoords: 1,
     viewbox: true,
     desc: false,
@@ -98,6 +100,8 @@ export function traceImageData(
     ),
   );
   if (options.ignoreWhite) svg = stripWhitePaths(svg);
+  // Rapikan struktur: 1 warna = 1 shape di dalam layer <g> bernama.
+  svg = mergePathsByColor(svg);
 
   return {
     svg,

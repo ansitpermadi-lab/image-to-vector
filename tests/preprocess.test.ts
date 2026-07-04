@@ -47,6 +47,30 @@ describe("removeBackground", () => {
     expect(withoutBg.svg).not.toMatch(/opacity="0(\.0+)?"/);
   });
 
+  it("halo antialiasing di tepi objek ikut terhapus", () => {
+    // Latar putih, objek merah, dan cincin 1px warna campuran (halo) di antaranya.
+    const size = 12;
+    const data = new Uint8ClampedArray(size * size * 4);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const i = (y * size + x) * 4;
+        const dist = Math.max(Math.abs(x - 6), Math.abs(y - 6));
+        if (dist <= 2) {
+          data.set([200, 30, 30, 255], i); // objek
+        } else if (dist === 3) {
+          data.set([235, 200, 200, 255], i); // halo: campuran putih-merah
+        } else {
+          data.set([255, 255, 255, 255], i); // latar
+        }
+      }
+    }
+    const result = removeBackground({ width: size, height: size, data }, 0.12);
+    const alphaAt = (x: number, y: number) => result.data[(y * size + x) * 4 + 3];
+    expect(alphaAt(0, 0)).toBe(0); // latar hilang
+    expect(alphaAt(6, 3)).toBe(0); // halo (dist 3 dari pusat) ikut hilang
+    expect(alphaAt(6, 6)).toBe(255); // objek tetap solid
+  });
+
   it("toleransi 0 hanya menghapus warna yang persis sama", () => {
     const input = makeImage();
     // Ubah satu piksel latar jadi hampir-putih.

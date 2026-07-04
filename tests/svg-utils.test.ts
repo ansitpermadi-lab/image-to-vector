@@ -5,6 +5,7 @@ import {
   countAnchors,
   extractPalette,
   hexToRgb,
+  mergePathsByColor,
   outlineSvg,
   recolorSvg,
   rgbToHex,
@@ -120,6 +121,29 @@ describe("svg-utils", () => {
   it("countAnchors menghitung segmen path", () => {
     // Path 1: M+2L, path 2: M+1L+1Q, path 3: M+1L, path 4: M+1L → 10 huruf perintah
     expect(countAnchors(SAMPLE_SVG)).toBe(10);
+  });
+
+  it("mergePathsByColor: 1 warna = 1 shape dalam layer <g> bernama", () => {
+    const out = mergePathsByColor(SAMPLE_SVG);
+    // 3 warna → 3 layer, masing-masing tepat satu path.
+    expect(out.match(/<g /g)).toHaveLength(3);
+    expect(out.match(/<path /g)).toHaveLength(3);
+    // Kedua subpath merah tergabung dalam satu d.
+    const redPath = out.match(/<g id="layer-1"[^>]*>.*?d="([^"]+)"/s)![1];
+    expect(redPath).toContain("M 0 0 L 5 0 L 5 5 Z");
+    expect(redPath).toContain("M 5 5 L 9 9 Q 9 5 5 5 Z");
+    // Layer dinamai hex warnanya; urutan mengikuti kemunculan pertama.
+    expect(out).toContain('data-name="#ff0000"');
+    expect(out.indexOf("#ff0000")).toBeLessThan(out.indexOf("#0000ff"));
+    // Header viewBox tetap utuh.
+    expect(out).toContain('viewBox="0 0 10 10"');
+  });
+
+  it("mergePathsByColor kompatibel dengan recolor dan outline", () => {
+    const merged = mergePathsByColor(SAMPLE_SVG);
+    expect(extractPalette(merged)).toHaveLength(3);
+    expect(recolorSvg(merged, "rgb(255,0,0)", "#00ff00")).toContain("rgb(0,255,0)");
+    expect(outlineSvg(merged)).toContain('fill="none"');
   });
 
   it("stripWhitePaths membuang path putih saja", () => {

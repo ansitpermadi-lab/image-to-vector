@@ -31,7 +31,8 @@ export const DEFAULT_TRACE_OPTIONS: TraceOptions = {
   noise: 8,
   corners: true,
   ignoreWhite: false,
-  removeBg: false,
+  // Default menyala: latar (mis. putih) otomatis dibuang; bisa dimatikan di UI.
+  removeBg: true,
   bgTolerance: 0.12,
 };
 

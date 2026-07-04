@@ -14,7 +14,7 @@ const BASE = {
   noise: 8,
   corners: true,
   ignoreWhite: false,
-  removeBg: false,
+  removeBg: true,
   bgTolerance: 0.12,
 } as const;
 

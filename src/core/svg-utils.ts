@@ -74,6 +74,62 @@ export function outlineSvg(svg: string, strokeColor = "#ff00ff"): string {
     .replace(/opacity="[\d.]+"/g, 'opacity="1"');
 }
 
+function attrOf(attrs: string, name: string): string {
+  return attrs.match(new RegExp(`${name}="([^"]*)"`))?.[1] ?? "";
+}
+
+/**
+ * Rapikan struktur SVG: semua path dengan warna sama digabung menjadi SATU
+ * path (multi-subpath) di dalam <g> layer bernama — 1 warna = 1 shape.
+ * Region tiap warna saling lepas (hasil segmentasi), jadi penggabungan
+ * subpath aman untuk fill-rule nonzero; lubang tetap ikut di d masing-masing.
+ */
+export function mergePathsByColor(svg: string): string {
+  const firstPath = svg.indexOf("<path");
+  if (firstPath === -1) return svg;
+  const header = svg.slice(0, firstPath).trimEnd();
+
+  interface Layer {
+    fill: string;
+    opacity: string;
+    ds: string[];
+  }
+  const layers = new Map<string, Layer>();
+  const order: string[] = [];
+  for (const match of svg.matchAll(/<path([^>]*)\/>/g)) {
+    const attrs = match[1];
+    const fill = attrOf(attrs, "fill");
+    const opacity = attrOf(attrs, "opacity") || "1";
+    const d = attrOf(attrs, "d");
+    if (!d) continue;
+    const key = `${fill}|${opacity}`;
+    if (!layers.has(key)) {
+      layers.set(key, { fill, opacity, ds: [] });
+      order.push(key);
+    }
+    layers.get(key)!.ds.push(d.trim());
+  }
+  if (order.length === 0) return svg;
+
+  const body = order
+    .map((key, i) => {
+      const layer = layers.get(key)!;
+      const name = layer.fill.startsWith("rgb")
+        ? rgbToHex(layer.fill)
+        : layer.fill;
+      // Stroke sewarna 1px menutup celah antialiasing antar-region.
+      return (
+        `<g id="layer-${i + 1}" data-name="${name}">` +
+        `<path fill="${layer.fill}" stroke="${layer.fill}" stroke-width="1" ` +
+        `opacity="${layer.opacity}" d="${layer.ds.join(" ")}" />` +
+        `</g>`
+      );
+    })
+    .join("\n");
+
+  return `${header}\n${body}\n</svg>`;
+}
+
 /** Perkiraan jumlah titik jangkar: jumlah segmen garis + kurva pada semua path. */
 export function countAnchors(svg: string): number {
   let anchors = 0;
