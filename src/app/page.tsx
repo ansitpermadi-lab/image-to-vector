@@ -1,5 +1,6 @@
 "use client";
 
+import JSZip from "jszip";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_TRACE_OPTIONS,
@@ -7,20 +8,28 @@ import {
   type TraceOptions,
   type TraceResult,
 } from "@/core/tracer/types";
-import type { TraceRequest, TraceResponse } from "@/workers/trace.worker";
+import type { TraceResponse } from "@/workers/trace.worker";
 
 /** Sisi terpanjang maksimum; gambar lebih besar di-resize agar browser tetap lancar. */
 const MAX_DIMENSION = 2048;
 const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
 
-interface LoadedImage {
+type ItemStatus = "queued" | "tracing" | "done" | "error";
+
+interface BatchItem {
+  id: string;
   name: string;
   previewUrl: string;
   input: TraceInput;
   wasResized: boolean;
+  status: ItemStatus;
+  result: TraceResult | null;
+  error: string | null;
 }
 
-async function fileToTraceInput(file: File): Promise<LoadedImage> {
+let nextItemId = 0;
+
+async function fileToItem(file: File): Promise<BatchItem> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
   const width = Math.max(1, Math.round(bitmap.width * scale));
@@ -34,118 +43,193 @@ async function fileToTraceInput(file: File): Promise<LoadedImage> {
   ctx.drawImage(bitmap, 0, 0, width, height);
   bitmap.close();
 
-  const imageData = ctx.getImageData(0, 0, width, height);
   return {
+    id: `item-${nextItemId++}`,
     name: file.name,
     previewUrl: URL.createObjectURL(file),
-    input: { width, height, data: imageData.data },
+    input: { width, height, data: ctx.getImageData(0, 0, width, height).data },
     wasResized: scale < 1,
+    status: "queued",
+    result: null,
+    error: null,
   };
 }
 
+function baseName(name: string): string {
+  return name.replace(/\.[^.]+$/, "") || "gambar";
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+const STATUS_LABEL: Record<ItemStatus, string> = {
+  queued: "antre",
+  tracing: "memproses…",
+  done: "selesai",
+  error: "gagal",
+};
+
 export default function Home() {
-  const [image, setImage] = useState<LoadedImage | null>(null);
+  const [items, setItems] = useState<BatchItem[]>([]);
   const [options, setOptions] = useState<TraceOptions>(DEFAULT_TRACE_OPTIONS);
-  const [result, setResult] = useState<TraceResult | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [zipping, setZipping] = useState(false);
 
   const workerRef = useRef<Worker | null>(null);
-  const requestIdRef = useRef(0);
+  /** Naik setiap setting berubah; respons dari generasi lama dibuang. */
+  const genRef = useRef(0);
+  /** id item yang sedang diproses worker (null = idle). */
+  const busyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const worker = new Worker(
       new URL("../workers/trace.worker.ts", import.meta.url),
     );
     worker.onmessage = (event: MessageEvent<TraceResponse>) => {
-      // Abaikan respons dari permintaan lama yang sudah tersusul.
-      if (event.data.id !== requestIdRef.current) return;
-      setBusy(false);
-      if (event.data.ok) {
-        setResult(event.data.result);
-        setError(null);
-      } else {
-        setError(`Gagal melakukan tracing: ${event.data.error}`);
-      }
+      const [gen, itemId] = event.data.id.split(":");
+      busyRef.current = null;
+      const stale = Number(gen) !== genRef.current;
+      // setItems selalu dipanggil agar efek antrian jalan lagi (memproses item berikutnya).
+      setItems((prev) =>
+        prev.map((item) => {
+          if (stale || item.id !== itemId) return item;
+          return event.data.ok
+            ? { ...item, status: "done", result: event.data.result, error: null }
+            : { ...item, status: "error", error: event.data.error, result: null };
+        }),
+      );
     };
     workerRef.current = worker;
     return () => worker.terminate();
   }, []);
 
-  const requestTrace = useCallback((input: TraceInput, opts: TraceOptions) => {
-    const worker = workerRef.current;
-    if (!worker) return;
-    const id = ++requestIdRef.current;
-    setBusy(true);
-    const message: TraceRequest = { id, input, options: opts };
-    worker.postMessage(message);
-  }, []);
-
-  // Re-trace otomatis (debounced) saat pengaturan berubah.
+  // Pompa antrian: kirim item "queued" berikutnya saat worker menganggur.
   useEffect(() => {
-    if (!image) return;
-    const timer = setTimeout(() => requestTrace(image.input, options), 250);
-    return () => clearTimeout(timer);
-  }, [image, options, requestTrace]);
+    if (busyRef.current || !workerRef.current) return;
+    const next = items.find((item) => item.status === "queued");
+    if (!next) return;
+    busyRef.current = next.id;
+    workerRef.current.postMessage({
+      id: `${genRef.current}:${next.id}`,
+      input: next.input,
+      options,
+    });
+    // Penanda status antrian, bukan sinkronisasi turunan — pola pompa antrian yang disengaja.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === next.id ? { ...item, status: "tracing" } : item,
+      ),
+    );
+  }, [items, options]);
 
-  const loadFile = useCallback(async (file: File) => {
-    if (!ACCEPTED_TYPES.includes(file.type)) {
-      setError(
-        `Format ${file.type || "tidak dikenal"} belum didukung. Gunakan PNG, JPG, WebP, GIF, atau BMP.`,
-      );
+  // Setting berubah → semua item di-trace ulang (debounced).
+  const optionsInitialized = useRef(false);
+  useEffect(() => {
+    if (!optionsInitialized.current) {
+      optionsInitialized.current = true;
       return;
     }
-    setError(null);
-    setResult(null);
-    try {
-      const loaded = await fileToTraceInput(file);
-      setImage((prev) => {
-        if (prev) URL.revokeObjectURL(prev.previewUrl);
-        return loaded;
-      });
-    } catch (err) {
-      setError(`Gagal membaca gambar: ${String(err)}`);
+    const timer = setTimeout(() => {
+      genRef.current++;
+      setItems((prev) => prev.map((item) => ({ ...item, status: "queued" })));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [options]);
+
+  const addFiles = useCallback(async (files: File[]) => {
+    const accepted = files.filter((f) => ACCEPTED_TYPES.includes(f.type));
+    const rejected = files.length - accepted.length;
+    setError(
+      rejected > 0
+        ? `${rejected} file dilewati (format tidak didukung). Gunakan PNG, JPG, WebP, GIF, atau BMP.`
+        : null,
+    );
+    for (const file of accepted) {
+      try {
+        const item = await fileToItem(file);
+        setItems((prev) => [...prev, item]);
+      } catch (err) {
+        setError(`Gagal membaca ${file.name}: ${String(err)}`);
+      }
     }
   }, []);
 
   // Dukung paste gambar dari clipboard.
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
-      const file = Array.from(event.clipboardData?.files ?? []).find((f) =>
+      const files = Array.from(event.clipboardData?.files ?? []).filter((f) =>
         f.type.startsWith("image/"),
       );
-      if (file) void loadFile(file);
+      if (files.length) void addFiles(files);
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [loadFile]);
+  }, [addFiles]);
 
-  const downloadSvg = () => {
-    if (!result || !image) return;
-    const blob = new Blob([result.svg], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = image.name.replace(/\.[^.]+$/, "") + ".svg";
-    link.click();
-    URL.revokeObjectURL(url);
+  const removeItem = (id: string) => {
+    setItems((prev) => {
+      const target = prev.find((item) => item.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((item) => item.id !== id);
+    });
   };
 
-  const copySvg = async () => {
-    if (!result) return;
-    await navigator.clipboard.writeText(result.svg);
+  const clearAll = () => {
+    setItems((prev) => {
+      prev.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      return [];
+    });
+    setError(null);
   };
 
-  const svgSizeKb = result ? (result.svg.length / 1024).toFixed(1) : null;
+  const downloadItem = (item: BatchItem) => {
+    if (!item.result) return;
+    downloadBlob(
+      new Blob([item.result.svg], { type: "image/svg+xml" }),
+      `${baseName(item.name)}.svg`,
+    );
+  };
+
+  const downloadZip = async () => {
+    const done = items.filter((item) => item.status === "done" && item.result);
+    if (!done.length) return;
+    setZipping(true);
+    try {
+      const zip = new JSZip();
+      const used = new Set<string>();
+      for (const item of done) {
+        const base = baseName(item.name);
+        let filename = `${base}.svg`;
+        for (let n = 2; used.has(filename); n++) filename = `${base}-${n}.svg`;
+        used.add(filename);
+        zip.file(filename, item.result!.svg);
+      }
+      downloadBlob(await zip.generateAsync({ type: "blob" }), "vektor.zip");
+    } finally {
+      setZipping(false);
+    }
+  };
+
+  const doneCount = items.filter((item) => item.status === "done").length;
+  const processing = items.some(
+    (item) => item.status === "queued" || item.status === "tracing",
+  );
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
       <header className="mb-8">
         <h1 className="text-3xl font-bold">Image to Vector</h1>
         <p className="mt-1 opacity-70">
-          Konversi PNG/JPG menjadi SVG langsung di browser — gambar tidak pernah
-          diunggah ke server.
+          Konversi banyak PNG/JPG menjadi SVG sekaligus, langsung di browser —
+          gambar tidak pernah diunggah ke server.
         </p>
       </header>
 
@@ -158,34 +242,29 @@ export default function Home() {
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          const file = e.dataTransfer.files[0];
-          if (file) void loadFile(file);
+          void addFiles(Array.from(e.dataTransfer.files));
         }}
         className={`mb-6 rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
           dragging ? "border-blue-500 bg-blue-500/10" : "border-gray-400/40"
         }`}
       >
         <p className="mb-3">
-          Tarik & letakkan gambar di sini, tempel dari clipboard (Ctrl+V), atau
+          Tarik & letakkan <strong>satu atau banyak gambar</strong> di sini,
+          tempel dari clipboard (Ctrl+V), atau
         </p>
         <label className="inline-block cursor-pointer rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700">
           Pilih file
           <input
             type="file"
             accept={ACCEPTED_TYPES.join(",")}
+            multiple
             className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void loadFile(file);
+              void addFiles(Array.from(e.target.files ?? []));
               e.target.value = "";
             }}
           />
         </label>
-        {image?.wasResized && (
-          <p className="mt-3 text-sm opacity-60">
-            Gambar diperkecil ke maks. {MAX_DIMENSION}px agar proses tetap cepat.
-          </p>
-        )}
       </div>
 
       {error && (
@@ -194,7 +273,7 @@ export default function Home() {
         </div>
       )}
 
-      {image && (
+      {items.length > 0 && (
         <>
           <section className="mb-6 grid gap-4 rounded-xl border border-gray-400/30 p-4 sm:grid-cols-2 lg:grid-cols-4">
             <label className="flex flex-col gap-1 text-sm">
@@ -253,63 +332,105 @@ export default function Home() {
             </label>
           </section>
 
-          <section className="grid gap-6 lg:grid-cols-2">
-            <figure className="rounded-xl border border-gray-400/30 p-4">
-              <figcaption className="mb-2 text-sm font-medium opacity-70">
-                Asli — {image.name}
-              </figcaption>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={image.previewUrl}
-                alt="Gambar asli"
-                className="max-h-[480px] w-full object-contain"
-              />
-            </figure>
-            <figure className="rounded-xl border border-gray-400/30 p-4">
-              <figcaption className="mb-2 flex items-center justify-between text-sm font-medium opacity-70">
-                <span>Hasil SVG {busy && "· memproses…"}</span>
-                {result && (
-                  <span>
-                    {result.pathCount} path · {svgSizeKb} KB ·{" "}
-                    {Math.round(result.durationMs)} ms
-                  </span>
-                )}
-              </figcaption>
-              {result ? (
-                <div
-                  className="max-h-[480px] w-full overflow-auto [&>svg]:h-auto [&>svg]:max-w-full"
-                  dangerouslySetInnerHTML={{ __html: result.svg }}
-                />
-              ) : (
-                <div className="flex h-64 items-center justify-center opacity-50">
-                  {busy ? "Memproses…" : "Menunggu hasil"}
-                </div>
-              )}
-            </figure>
+          <section className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-gray-400/30 p-4">
+            <span className="text-sm font-medium">
+              {doneCount}/{items.length} selesai
+              {processing && " · sedang memproses…"}
+            </span>
+            <div className="ml-auto flex flex-wrap gap-3">
+              <button
+                onClick={downloadZip}
+                disabled={doneCount === 0 || zipping}
+                className="rounded-lg bg-blue-600 px-5 py-2.5 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {zipping ? "Membuat ZIP…" : `Download semua (${doneCount}) — ZIP`}
+              </button>
+              <button
+                onClick={clearAll}
+                className="rounded-lg border border-gray-400/50 px-5 py-2.5 font-medium hover:bg-gray-500/10"
+              >
+                Hapus semua
+              </button>
+            </div>
           </section>
 
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button
-              onClick={downloadSvg}
-              disabled={!result || busy}
-              className="rounded-lg bg-blue-600 px-5 py-2.5 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Download SVG
-            </button>
-            <button
-              onClick={copySvg}
-              disabled={!result || busy}
-              className="rounded-lg border border-gray-400/50 px-5 py-2.5 font-medium hover:bg-gray-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Salin kode SVG
-            </button>
-          </div>
+          <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {items.map((item) => (
+              <article
+                key={item.id}
+                className="flex flex-col gap-3 rounded-xl border border-gray-400/30 p-4"
+              >
+                <header className="flex items-center justify-between gap-2 text-sm">
+                  <span className="truncate font-medium" title={item.name}>
+                    {item.name}
+                  </span>
+                  <span
+                    className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                      item.status === "done"
+                        ? "bg-green-500/15 text-green-700 dark:text-green-400"
+                        : item.status === "error"
+                          ? "bg-red-500/15 text-red-700 dark:text-red-400"
+                          : "bg-gray-500/15 opacity-80"
+                    }`}
+                  >
+                    {STATUS_LABEL[item.status]}
+                  </span>
+                </header>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex h-36 items-center justify-center overflow-hidden rounded-lg border border-gray-400/20">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={item.previewUrl}
+                      alt={`Asli: ${item.name}`}
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </div>
+                  <div className="flex h-36 items-center justify-center overflow-hidden rounded-lg border border-gray-400/20 [&_svg]:max-h-full [&_svg]:max-w-full">
+                    {item.result ? (
+                      <div
+                        className="flex h-full w-full items-center justify-center"
+                        dangerouslySetInnerHTML={{ __html: item.result.svg }}
+                      />
+                    ) : (
+                      <span className="text-xs opacity-50">
+                        {item.status === "error" ? "gagal" : "menunggu…"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-xs opacity-60">
+                  {item.result
+                    ? `${item.result.pathCount} path · ${(item.result.svg.length / 1024).toFixed(1)} KB · ${Math.round(item.result.durationMs)} ms`
+                    : item.error ?? `${item.input.width}×${item.input.height}${item.wasResized ? " (diperkecil)" : ""}`}
+                </p>
+
+                <div className="mt-auto flex gap-2">
+                  <button
+                    onClick={() => downloadItem(item)}
+                    disabled={!item.result}
+                    className="flex-1 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Download SVG
+                  </button>
+                  <button
+                    onClick={() => removeItem(item.id)}
+                    className="rounded-lg border border-gray-400/50 px-3 py-1.5 text-sm font-medium hover:bg-gray-500/10"
+                  >
+                    Hapus
+                  </button>
+                </div>
+              </article>
+            ))}
+          </section>
         </>
       )}
 
       <footer className="mt-12 border-t border-gray-400/20 pt-4 text-sm opacity-60">
         Optimal untuk logo, ikon, dan ilustrasi flat. Foto kompleks menghasilkan
-        gaya poster dengan warna yang disederhanakan.
+        gaya poster dengan warna yang disederhanakan. Gambar besar otomatis
+        diperkecil ke {MAX_DIMENSION}px.
       </footer>
     </main>
   );

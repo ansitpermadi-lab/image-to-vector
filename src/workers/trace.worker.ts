@@ -2,14 +2,15 @@ import { traceImageData } from "@/core/tracer";
 import type { TraceInput, TraceOptions, TraceResult } from "@/core/tracer";
 
 export interface TraceRequest {
-  id: number;
+  /** Format "generasi:itemId" — generasi lama dibuang oleh UI saat setting berubah. */
+  id: string;
   input: TraceInput;
   options: TraceOptions;
 }
 
 export type TraceResponse =
-  | { id: number; ok: true; result: TraceResult }
-  | { id: number; ok: false; error: string };
+  | { id: string; ok: true; result: TraceResult }
+  | { id: string; ok: false; error: string };
 
 self.onmessage = (event: MessageEvent<TraceRequest>) => {
   const { id, input, options } = event.data;
