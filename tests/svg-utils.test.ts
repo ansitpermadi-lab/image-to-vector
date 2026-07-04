@@ -5,10 +5,15 @@ import {
   countAnchors,
   extractPalette,
   hexToRgb,
+  listLayers,
   mergePathsByColor,
+  mergeSimilarColors,
   outlineSvg,
   recolorSvg,
   rgbToHex,
+  setLayerVisibility,
+  simplifyPathD,
+  simplifySvgPaths,
 } from "@/core/svg-utils";
 import { stripWhitePaths, traceImageData } from "@/core/tracer";
 import { DEFAULT_TRACE_OPTIONS, type TraceInput } from "@/core/tracer/types";
@@ -144,6 +149,59 @@ describe("svg-utils", () => {
     expect(extractPalette(merged)).toHaveLength(3);
     expect(recolorSvg(merged, "rgb(255,0,0)", "#00ff00")).toContain("rgb(0,255,0)");
     expect(outlineSvg(merged)).toContain('fill="none"');
+  });
+
+  it("simplifyPathD: gerigi kecil hilang, bentuk & endpoint dipertahankan", () => {
+    // Garis 0→20 dengan zigzag ±0.4px di tiap langkah: RDP eps 1 harus meluruskan.
+    const zigzag: string[] = ["M", "0", "0"];
+    for (let x = 1; x <= 20; x++) {
+      zigzag.push("L", String(x), x % 2 ? "0.4" : "0");
+    }
+    zigzag.push("Z");
+    const out = simplifyPathD(zigzag.join(" "), 1);
+    const segments = (out.match(/L/g) ?? []).length;
+    expect(segments).toBeLessThanOrEqual(2); // dari 20 segmen jadi garis lurus
+    expect(out.startsWith("M 0 0")).toBe(true);
+    expect(out).toContain("L 20 0"); // endpoint tetap
+    expect(out.endsWith("Z")).toBe(true);
+  });
+
+  it("simplifyPathD mempertahankan kurva Q dan sudut nyata", () => {
+    const d = "M 0 0 L 10 0 L 10 10 Q 5 15 0 10 Z";
+    const out = simplifyPathD(d, 0.8);
+    expect(out).toContain("Q 5 15 0 10"); // kurva utuh
+    expect(out).toContain("L 10 0");
+    expect(out).toContain("L 10 10"); // sudut 90° tidak dibuang
+  });
+
+  it("simplifySvgPaths dengan epsilon 0 tidak mengubah apa pun", () => {
+    expect(simplifySvgPaths(SAMPLE_SVG, 0)).toBe(SAMPLE_SVG);
+  });
+
+  it("mergeSimilarColors melebur warna nyaris kembar ke yang dominan", () => {
+    const svg =
+      '<svg><path fill="rgb(100,100,100)" stroke="rgb(100,100,100)" opacity="1" d="M 0 0 L 1 1 Z" />' +
+      '<path fill="rgb(100,100,100)" stroke="rgb(100,100,100)" opacity="1" d="M 2 2 L 3 3 Z" />' +
+      '<path fill="rgb(105,103,101)" stroke="rgb(105,103,101)" opacity="1" d="M 4 4 L 5 5 Z" />' +
+      '<path fill="rgb(200,50,50)" stroke="rgb(200,50,50)" opacity="1" d="M 6 6 L 7 7 Z" /></svg>';
+    const out = mergeSimilarColors(svg, 20);
+    expect(out).not.toContain("rgb(105,103,101)"); // dilebur ke 100,100,100
+    expect(out).toContain("rgb(200,50,50)"); // warna beda tetap
+    expect(extractPalette(out)).toHaveLength(2);
+  });
+
+  it("listLayers + setLayerVisibility bekerja pada hasil merge", () => {
+    const merged = mergePathsByColor(SAMPLE_SVG);
+    const layers = listLayers(merged);
+    expect(layers).toHaveLength(3);
+    expect(layers[0]).toMatchObject({ id: "layer-1", name: "#ff0000" });
+    expect(layers[0].anchors).toBeGreaterThan(0);
+
+    const hidden = setLayerVisibility(merged, ["layer-2"]);
+    expect(hidden).toContain('<g id="layer-2" display="none"');
+    expect(hidden).not.toContain('<g id="layer-1" display="none"');
+    // Bisa dikembalikan: apply lagi dari sumber asli tanpa id itu.
+    expect(setLayerVisibility(merged, [])).toBe(merged);
   });
 
   it("stripWhitePaths membuang path putih saja", () => {

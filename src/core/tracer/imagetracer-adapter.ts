@@ -1,6 +1,10 @@
 import ImageTracer, { type ImageTracerOptions } from "imagetracerjs";
 import { binarize, grayPalette, toGrayscale } from "@/core/preprocess/tone";
-import { mergePathsByColor } from "@/core/svg-utils";
+import {
+  mergePathsByColor,
+  mergeSimilarColors,
+  simplifySvgPaths,
+} from "@/core/svg-utils";
 import {
   DEFAULT_TRACE_OPTIONS,
   type TraceInput,
@@ -19,8 +23,11 @@ function clamp(value: number, min: number, max: number): number {
 export function toImageTracerOptions(options: TraceOptions): ImageTracerOptions {
   const detail = clamp(options.detail, 0, 1);
   const smoothing = clamp(options.smoothing, 0, 1);
+  const simplify = clamp(options.simplify, 0, 1);
   // Threshold rendah = kurva mengikuti piksel lebih ketat (lebih detail).
-  const threshold = 0.5 + (1 - detail) * 1.5;
+  // Simplify melonggarkan toleransi fitting — tepi kasar tidak diikuti
+  // titik demi titik (pengurang anchor terbesar untuk gambar bertekstur).
+  const threshold = (0.5 + (1 - detail) * 1.5) * (1 + simplify * 3);
 
   const base: ImageTracerOptions = {
     ltres: threshold,
@@ -100,6 +107,10 @@ export function traceImageData(
     ),
   );
   if (options.ignoreWhite) svg = stripWhitePaths(svg);
+  // Lebur warna nyaris kembar supaya tidak jadi layer ganda.
+  svg = mergeSimilarColors(svg);
+  // Sederhanakan path (RDP) — buang anchor yang cuma mengikuti gerigi piksel.
+  svg = simplifySvgPaths(svg, clamp(options.simplify, 0, 1) * 2.5);
   // Rapikan struktur: 1 warna = 1 shape di dalam layer <g> bernama.
   svg = mergePathsByColor(svg);
 

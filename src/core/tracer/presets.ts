@@ -12,6 +12,7 @@ export interface Preset {
 const BASE = {
   threshold: 0.5,
   noise: 8,
+  simplify: 0.3,
   corners: true,
   ignoreWhite: false,
   removeBg: true,
@@ -52,7 +53,7 @@ export const PRESETS: readonly Preset[] = [
     key: "foto",
     label: "Foto (poster)",
     description: "Warna banyak + smoothing — foto menjadi gaya poster.",
-    options: { ...BASE, mode: "color", colorCount: 32, detail: 0.45, smoothing: 0.35, noise: 12 },
+    options: { ...BASE, mode: "color", colorCount: 32, detail: 0.45, smoothing: 0.35, noise: 12, simplify: 0.45 },
   },
 ];
 
@@ -64,6 +65,7 @@ const PRESET_FIELDS = [
   "smoothing",
   "threshold",
   "noise",
+  "simplify",
   "corners",
   "ignoreWhite",
 ] as const;

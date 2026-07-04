@@ -12,6 +12,8 @@ export interface TraceOptions {
   threshold: number;
   /** Area minimum dalam piksel; bercak lebih kecil dari ini diabaikan (Noise di Illustrator). */
   noise: number;
+  /** 0–1; kekuatan penyederhanaan path (RDP) — makin tinggi makin sedikit anchor. */
+  simplify: number;
   /** Pertegas sudut 90° (Corners di Illustrator). */
   corners: boolean;
   /** Buang path putih/hampir putih dari hasil (Ignore White di Illustrator). */
@@ -29,6 +31,7 @@ export const DEFAULT_TRACE_OPTIONS: TraceOptions = {
   smoothing: 0,
   threshold: 0.5,
   noise: 8,
+  simplify: 0.3,
   corners: true,
   ignoreWhite: false,
   // Default menyala: latar (mis. putih) otomatis dibuang; bisa dimatikan di UI.

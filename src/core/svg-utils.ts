@@ -130,6 +130,148 @@ export function mergePathsByColor(svg: string): string {
   return `${header}\n${body}\n</svg>`;
 }
 
+/** Ramer–Douglas–Peucker: buang titik polyline yang menyimpang < epsilon. */
+function rdp(points: Array<[number, number]>, epsilon: number): Array<[number, number]> {
+  if (points.length < 3) return points;
+  const keep = new Array<boolean>(points.length).fill(false);
+  keep[0] = keep[points.length - 1] = true;
+  const stack: Array<[number, number]> = [[0, points.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    const [ax, ay] = points[a];
+    const [bx, by] = points[b];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1e-12;
+    let maxDist = 0;
+    let maxIdx = -1;
+    for (let i = a + 1; i < b; i++) {
+      const dist =
+        Math.abs(dy * points[i][0] - dx * points[i][1] + bx * ay - by * ax) / len;
+      if (dist > maxDist) {
+        maxDist = dist;
+        maxIdx = i;
+      }
+    }
+    if (maxDist > epsilon && maxIdx > 0) {
+      keep[maxIdx] = true;
+      stack.push([a, maxIdx], [maxIdx, b]);
+    }
+  }
+  return points.filter((_, i) => keep[i]);
+}
+
+const round1 = (v: number) => String(Math.round(v * 10) / 10);
+
+/**
+ * Sederhanakan satu atribut d (format imagetracer: M/L/Q/Z absolut):
+ * deretan segmen L dijalankan lewat RDP; kurva Q dipertahankan.
+ * Padanan Object > Path > Simplify di Illustrator.
+ */
+export function simplifyPathD(d: string, epsilon: number): string {
+  const tokens = d.trim().split(/[\s,]+/);
+  const out: string[] = [];
+  let run: Array<[number, number]> = [];
+
+  const flushRun = () => {
+    if (run.length >= 2) {
+      const simplified = run.length >= 3 ? rdp(run, epsilon) : run;
+      for (let k = 1; k < simplified.length; k++) {
+        out.push("L", round1(simplified[k][0]), round1(simplified[k][1]));
+      }
+    }
+    run = [];
+  };
+
+  let i = 0;
+  while (i < tokens.length) {
+    const cmd = tokens[i];
+    if (cmd === "M") {
+      flushRun();
+      out.push("M", tokens[i + 1], tokens[i + 2]);
+      run = [[Number(tokens[i + 1]), Number(tokens[i + 2])]];
+      i += 3;
+    } else if (cmd === "L") {
+      const x = Number(tokens[i + 1]);
+      const y = Number(tokens[i + 2]);
+      if (run.length === 0) run = [[x, y]];
+      else run.push([x, y]);
+      i += 3;
+    } else if (cmd === "Q") {
+      flushRun();
+      out.push("Q", tokens[i + 1], tokens[i + 2], tokens[i + 3], tokens[i + 4]);
+      run = [[Number(tokens[i + 3]), Number(tokens[i + 4])]];
+      i += 5;
+    } else if (cmd === "Z" || cmd === "z") {
+      flushRun();
+      out.push("Z");
+      i += 1;
+    } else {
+      return d; // format tak dikenal — jangan sentuh
+    }
+  }
+  flushRun();
+  return out.join(" ");
+}
+
+/** Terapkan simplifyPathD ke semua path pada SVG. */
+export function simplifySvgPaths(svg: string, epsilonPx: number): string {
+  if (epsilonPx <= 0) return svg;
+  return svg.replace(/ d="([^"]+)"/g, (_, d) => ` d="${simplifyPathD(d, epsilonPx)}"`);
+}
+
+/**
+ * Lebur warna palet yang nyaris kembar (jarak RGB ≤ delta) ke warna yang
+ * paling banyak dipakai — mencegah layer ganda seperti #e5e8ef vs #e6e9f0.
+ */
+export function mergeSimilarColors(svg: string, delta = 20): string {
+  const palette = extractPalette(svg); // sudah terurut desc berdasarkan pemakaian
+  const kept: Array<{ fill: string; rgb: [number, number, number] }> = [];
+  const mapping: Record<string, string> = {};
+  for (const entry of palette) {
+    const m = entry.fill.match(/rgb\((\d+),(\d+),(\d+)\)/);
+    if (!m) continue;
+    const rgb: [number, number, number] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const near = kept.find(
+      (k) =>
+        Math.hypot(k.rgb[0] - rgb[0], k.rgb[1] - rgb[1], k.rgb[2] - rgb[2]) <= delta,
+    );
+    if (near) mapping[entry.fill] = rgbToHex(near.fill);
+    else kept.push({ fill: entry.fill, rgb });
+  }
+  return Object.keys(mapping).length ? applyRecolors(svg, mapping) : svg;
+}
+
+export interface LayerInfo {
+  id: string;
+  name: string;
+  fill: string;
+  anchors: number;
+}
+
+/** Daftar layer <g> hasil mergePathsByColor, urut sesuai dokumen. */
+export function listLayers(svg: string): LayerInfo[] {
+  return [
+    ...svg.matchAll(
+      /<g id="(layer-\d+)" data-name="([^"]+)"[^>]*><path[^>]*fill="([^"]+)"[^>]*d="([^"]+)"/g,
+    ),
+  ].map((m) => ({
+    id: m[1],
+    name: m[2],
+    fill: m[3],
+    anchors: (m[4].match(/[LQMC]/gi) ?? []).length,
+  }));
+}
+
+/** Sembunyikan layer tertentu (display="none") tanpa membuang datanya. */
+export function setLayerVisibility(svg: string, hiddenIds: string[]): string {
+  let out = svg;
+  for (const id of hiddenIds) {
+    out = out.replace(`<g id="${id}"`, `<g id="${id}" display="none"`);
+  }
+  return out;
+}
+
 /** Perkiraan jumlah titik jangkar: jumlah segmen garis + kurva pada semua path. */
 export function countAnchors(svg: string): number {
   let anchors = 0;

@@ -2,7 +2,8 @@
 
 import JSZip from "jszip";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CompareModal } from "@/components/CompareModal";
+import { CompareModal, type ItemEdits } from "@/components/CompareModal";
+import { applyRecolors, setLayerVisibility } from "@/core/svg-utils";
 import { matchPreset, PRESETS } from "@/core/tracer/presets";
 import {
   DEFAULT_TRACE_OPTIONS,
@@ -28,10 +29,12 @@ interface BatchItem {
   wasResized: boolean;
   status: ItemStatus;
   result: TraceResult | null;
-  /** SVG dengan warna yang sudah diganti pengguna (null = pakai hasil asli). */
-  editedSvg: string | null;
+  /** Edit pengguna dari panel Layers: recolor per warna + layer tersembunyi. */
+  edits: ItemEdits;
   error: string | null;
 }
+
+const NO_EDITS: ItemEdits = { colorEdits: {}, hiddenLayers: [] };
 
 let nextItemId = 0;
 
@@ -58,7 +61,7 @@ async function fileToItem(file: File): Promise<BatchItem> {
     wasResized: scale < 1,
     status: "queued",
     result: null,
-    editedSvg: null,
+    edits: NO_EDITS,
     error: null,
   };
 }
@@ -101,8 +104,8 @@ export default function Home() {
         prev.map((item) => {
           if (stale || item.id !== itemId) return item;
           return event.data.ok
-            ? // Hasil baru membatalkan recolor lama (paletnya bisa berbeda).
-              { ...item, status: "done", result: event.data.result, editedSvg: null, error: null }
+            ? // Hasil baru membatalkan edit lama (palet & layer bisa berbeda).
+              { ...item, status: "done", result: event.data.result, edits: NO_EDITS, error: null }
             : { ...item, status: "error", error: event.data.error, result: null };
         }),
       );
@@ -191,7 +194,13 @@ export default function Home() {
     setError(null);
   };
 
-  const itemSvg = (item: BatchItem) => item.editedSvg ?? item.result?.svg ?? "";
+  const itemSvg = (item: BatchItem) => {
+    if (!item.result) return "";
+    return setLayerVisibility(
+      applyRecolors(item.result.svg, item.edits.colorEdits),
+      item.edits.hiddenLayers,
+    );
+  };
 
   const downloadItem = (item: BatchItem) => {
     if (!item.result) return;
@@ -367,6 +376,20 @@ export default function Home() {
                 value={options.noise}
                 onChange={(e) =>
                   setOptions({ ...options, noise: Number(e.target.value) })
+                }
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">
+                Sederhanakan: {Math.round(options.simplify * 100)}%
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(options.simplify * 100)}
+                onChange={(e) =>
+                  setOptions({ ...options, simplify: Number(e.target.value) / 100 })
                 }
               />
             </label>
@@ -568,11 +591,11 @@ export default function Home() {
           name={viewItem.name}
           previewUrl={viewItem.previewUrl}
           result={viewItem.result}
-          editedSvg={viewItem.editedSvg}
-          onEdited={(svg) =>
+          edits={viewItem.edits}
+          onEdits={(edits) =>
             setItems((prev) =>
               prev.map((item) =>
-                item.id === viewItem.id ? { ...item, editedSvg: svg } : item,
+                item.id === viewItem.id ? { ...item, edits } : item,
               ),
             )
           }
