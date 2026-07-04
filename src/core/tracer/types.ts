@@ -8,6 +8,10 @@ export interface TraceOptions {
   detail: number;
   /** 0–1; blur ringan sebelum tracing untuk meredam noise. */
   smoothing: number;
+  /** Jadikan warna latar (dideteksi dari sudut gambar) transparan sebelum tracing. */
+  removeBg: boolean;
+  /** 0–1; seberapa jauh warna boleh menyimpang dari warna latar dan tetap dihapus. */
+  bgTolerance: number;
 }
 
 export const DEFAULT_TRACE_OPTIONS: TraceOptions = {
@@ -15,6 +19,8 @@ export const DEFAULT_TRACE_OPTIONS: TraceOptions = {
   colorCount: 16,
   detail: 0.7,
   smoothing: 0,
+  removeBg: false,
+  bgTolerance: 0.12,
 };
 
 /** Bentuk data piksel yang aman dikirim lintas Web Worker (structured clone). */

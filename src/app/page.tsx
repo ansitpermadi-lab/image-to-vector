@@ -2,12 +2,15 @@
 
 import JSZip from "jszip";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CompareModal } from "@/components/CompareModal";
+import { matchPreset, PRESETS } from "@/core/tracer/presets";
 import {
   DEFAULT_TRACE_OPTIONS,
   type TraceInput,
   type TraceOptions,
   type TraceResult,
 } from "@/core/tracer/types";
+import { baseName, downloadBlob } from "@/lib/download";
 import type { TraceResponse } from "@/workers/trace.worker";
 
 /** Sisi terpanjang maksimum; gambar lebih besar di-resize agar browser tetap lancar. */
@@ -19,6 +22,7 @@ type ItemStatus = "queued" | "tracing" | "done" | "error";
 interface BatchItem {
   id: string;
   name: string;
+  fileSize: number;
   previewUrl: string;
   input: TraceInput;
   wasResized: boolean;
@@ -46,6 +50,7 @@ async function fileToItem(file: File): Promise<BatchItem> {
   return {
     id: `item-${nextItemId++}`,
     name: file.name,
+    fileSize: file.size,
     previewUrl: URL.createObjectURL(file),
     input: { width, height, data: ctx.getImageData(0, 0, width, height).data },
     wasResized: scale < 1,
@@ -55,19 +60,6 @@ async function fileToItem(file: File): Promise<BatchItem> {
   };
 }
 
-function baseName(name: string): string {
-  return name.replace(/\.[^.]+$/, "") || "gambar";
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
 const STATUS_LABEL: Record<ItemStatus, string> = {
   queued: "antre",
   tracing: "memproses…",
@@ -75,12 +67,17 @@ const STATUS_LABEL: Record<ItemStatus, string> = {
   error: "gagal",
 };
 
+function kb(bytes: number): string {
+  return (bytes / 1024).toFixed(1) + " KB";
+}
+
 export default function Home() {
   const [items, setItems] = useState<BatchItem[]>([]);
   const [options, setOptions] = useState<TraceOptions>(DEFAULT_TRACE_OPTIONS);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [zipping, setZipping] = useState(false);
+  const [viewItemId, setViewItemId] = useState<string | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   /** Naik setiap setting berubah; respons dari generasi lama dibuang. */
@@ -218,10 +215,21 @@ export default function Home() {
     }
   };
 
+  const applyPreset = (presetOptions: TraceOptions) => {
+    // Toggle hapus-background berdiri sendiri; preset tidak menimpanya.
+    setOptions({
+      ...presetOptions,
+      removeBg: options.removeBg,
+      bgTolerance: options.bgTolerance,
+    });
+  };
+
+  const activePreset = matchPreset(options);
   const doneCount = items.filter((item) => item.status === "done").length;
   const processing = items.some(
     (item) => item.status === "queued" || item.status === "tracing",
   );
+  const viewItem = items.find((item) => item.id === viewItemId);
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
@@ -275,7 +283,30 @@ export default function Home() {
 
       {items.length > 0 && (
         <>
-          <section className="mb-6 grid gap-4 rounded-xl border border-gray-400/30 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <section className="mb-4 flex flex-wrap items-center gap-2">
+            <span className="mr-1 text-sm font-medium opacity-70">Preset:</span>
+            {PRESETS.map((preset) => (
+              <button
+                key={preset.key}
+                onClick={() => applyPreset(preset.options)}
+                title={preset.description}
+                className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                  activePreset === preset.key
+                    ? "bg-blue-600 text-white"
+                    : "border border-gray-400/50 hover:bg-gray-500/10"
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+            {!activePreset && (
+              <span className="rounded-full border border-dashed border-gray-400/50 px-4 py-1.5 text-sm opacity-60">
+                Custom
+              </span>
+            )}
+          </section>
+
+          <section className="mb-6 grid gap-4 rounded-xl border border-gray-400/30 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium">Mode</span>
               <select
@@ -330,6 +361,37 @@ export default function Home() {
                 }
               />
             </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">Hapus background</span>
+              <span className="flex items-center gap-2 py-1.5">
+                <input
+                  type="checkbox"
+                  checked={options.removeBg}
+                  onChange={(e) =>
+                    setOptions({ ...options, removeBg: e.target.checked })
+                  }
+                  className="h-4 w-4 accent-blue-600"
+                />
+                <span className="text-xs opacity-70">
+                  jadikan warna latar transparan
+                </span>
+              </span>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">
+                Toleransi BG: {Math.round(options.bgTolerance * 100)}%
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={60}
+                value={Math.round(options.bgTolerance * 100)}
+                disabled={!options.removeBg}
+                onChange={(e) =>
+                  setOptions({ ...options, bgTolerance: Number(e.target.value) / 100 })
+                }
+              />
+            </label>
           </section>
 
           <section className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-gray-400/30 p-4">
@@ -377,18 +439,23 @@ export default function Home() {
                   </span>
                 </header>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="flex h-36 items-center justify-center overflow-hidden rounded-lg border border-gray-400/20">
+                <button
+                  onClick={() => item.result && setViewItemId(item.id)}
+                  disabled={!item.result}
+                  title={item.result ? "Klik untuk membandingkan dengan zoom" : undefined}
+                  className={`grid grid-cols-2 gap-2 text-left ${item.result ? "cursor-zoom-in" : "cursor-default"}`}
+                >
+                  <span className="flex h-36 items-center justify-center overflow-hidden rounded-lg border border-gray-400/20">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={item.previewUrl}
                       alt={`Asli: ${item.name}`}
                       className="max-h-full max-w-full object-contain"
                     />
-                  </div>
-                  <div className="flex h-36 items-center justify-center overflow-hidden rounded-lg border border-gray-400/20 [&_svg]:max-h-full [&_svg]:max-w-full">
+                  </span>
+                  <span className="flex h-36 items-center justify-center overflow-hidden rounded-lg border border-gray-400/20 [&_svg]:max-h-full [&_svg]:max-w-full">
                     {item.result ? (
-                      <div
+                      <span
                         className="flex h-full w-full items-center justify-center"
                         dangerouslySetInnerHTML={{ __html: item.result.svg }}
                       />
@@ -397,12 +464,12 @@ export default function Home() {
                         {item.status === "error" ? "gagal" : "menunggu…"}
                       </span>
                     )}
-                  </div>
-                </div>
+                  </span>
+                </button>
 
-                <p className="text-xs opacity-60">
+                <p className="text-xs opacity-60 tabular-nums">
                   {item.result
-                    ? `${item.result.pathCount} path · ${(item.result.svg.length / 1024).toFixed(1)} KB · ${Math.round(item.result.durationMs)} ms`
+                    ? `${kb(item.fileSize)} → ${kb(item.result.svg.length)} · ${item.result.pathCount} path · ${Math.round(item.result.durationMs)} ms`
                     : item.error ?? `${item.input.width}×${item.input.height}${item.wasResized ? " (diperkecil)" : ""}`}
                 </p>
 
@@ -415,6 +482,13 @@ export default function Home() {
                     Download SVG
                   </button>
                   <button
+                    onClick={() => item.result && setViewItemId(item.id)}
+                    disabled={!item.result}
+                    className="rounded-lg border border-gray-400/50 px-3 py-1.5 text-sm font-medium hover:bg-gray-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Bandingkan
+                  </button>
+                  <button
                     onClick={() => removeItem(item.id)}
                     className="rounded-lg border border-gray-400/50 px-3 py-1.5 text-sm font-medium hover:bg-gray-500/10"
                   >
@@ -425,6 +499,15 @@ export default function Home() {
             ))}
           </section>
         </>
+      )}
+
+      {viewItem?.result && (
+        <CompareModal
+          name={viewItem.name}
+          previewUrl={viewItem.previewUrl}
+          result={viewItem.result}
+          onClose={() => setViewItemId(null)}
+        />
       )}
 
       <footer className="mt-12 border-t border-gray-400/20 pt-4 text-sm opacity-60">

@@ -54,14 +54,21 @@ export function toImageTracerOptions(options: TraceOptions): ImageTracerOptions 
   };
 }
 
+/** Buang path yang sepenuhnya transparan (mis. latar hasil removeBackground). */
+export function stripInvisiblePaths(svg: string): string {
+  return svg.replace(/<path[^>]*\sopacity="0(\.0+)?"[^>]*\/>\s*/g, "");
+}
+
 export function traceImageData(
   input: TraceInput,
   options: TraceOptions = DEFAULT_TRACE_OPTIONS,
 ): TraceResult {
   const start = performance.now();
-  const svg = ImageTracer.imagedataToSVG(
-    { width: input.width, height: input.height, data: input.data },
-    toImageTracerOptions(options),
+  const svg = stripInvisiblePaths(
+    ImageTracer.imagedataToSVG(
+      { width: input.width, height: input.height, data: input.data },
+      toImageTracerOptions(options),
+    ),
   );
   return {
     svg,
