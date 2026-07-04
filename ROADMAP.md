@@ -2,7 +2,7 @@
 
 Web app untuk mengubah gambar raster (PNG/JPG/WebP) menjadi grafik vektor **SVG**, dengan seluruh pemrosesan berjalan **di browser** (WASM). Tidak ada server pemrosesan: gratis di-hosting, cepat, dan gambar pengguna tidak pernah meninggalkan perangkatnya.
 
-> Status: 📋 Perencanaan — belum ada kode. Dokumen ini adalah acuan pembangunan.
+> Status: 🚧 Dalam pengembangan — Fase 0 & 1 selesai, Fase 2 sebagian.
 
 ---
 
@@ -42,31 +42,31 @@ Web app untuk mengubah gambar raster (PNG/JPG/WebP) menjadi grafik vektor **SVG*
 
 ## 3. Fase Pembangunan
 
-### Fase 0 — Fondasi Proyek (± 1 sesi kerja)
+### Fase 0 — Fondasi Proyek (± 1 sesi kerja) ✅
 Tujuan: repositori siap dikembangkan.
-- [ ] Inisialisasi Next.js + TypeScript + Tailwind, konfigurasi static export.
-- [ ] ESLint + Prettier + Vitest terpasang dan jalan.
-- [ ] GitHub Actions: lint + test + build pada setiap push/PR.
-- [ ] README dasar (deskripsi, cara menjalankan lokal).
+- [x] Inisialisasi Next.js + TypeScript + Tailwind, konfigurasi static export.
+- [x] ESLint + Vitest terpasang dan jalan.
+- [x] GitHub Actions: lint + test + build pada setiap push/PR.
+- [x] README dasar (deskripsi, cara menjalankan lokal).
 
 **Selesai jika:** `npm run dev` menampilkan halaman kosong ber-layout, CI hijau.
 
-### Fase 1 — Bukti Konsep Tracing (± 1–2 sesi)
+### Fase 1 — Bukti Konsep Tracing (± 1–2 sesi) ✅
 Tujuan: membuktikan pipeline gambar → SVG jalan di browser.
-- [ ] Integrasi engine tracing (target utama: VTracer WASM; jika integrasinya bermasalah, mulai dengan ImageTracer.js).
-- [ ] Interface `trace()` terpisah dari UI + berjalan di Web Worker.
-- [ ] Halaman uji sederhana: pilih file → tampilkan SVG hasil mentah.
+- [x] Integrasi engine tracing (dimulai dengan ImageTracer.js sesuai rencana mitigasi; VTracer WASM menyusul di Fase 3).
+- [x] Interface `trace()` terpisah dari UI + berjalan di Web Worker.
+- [x] Halaman uji: pilih file → tampilkan SVG (terverifikasi E2E di Chromium headless).
 
 **Selesai jika:** logo PNG contoh berhasil dikonversi menjadi SVG yang terlihat benar.
 
-### Fase 2 — MVP yang Bisa Dipakai (± 2–3 sesi)
+### Fase 2 — MVP yang Bisa Dipakai (± 2–3 sesi) 🚧
 Tujuan: alur lengkap yang nyaman untuk pengguna awam.
-- [ ] Upload via drag-and-drop, file picker, dan paste dari clipboard.
-- [ ] Preview berdampingan **sebelum/sesudah** dengan zoom & pan.
-- [ ] Panel pengaturan dasar: jumlah warna, detail/smoothing, mode (warna / hitam-putih).
-- [ ] Re-trace otomatis (debounced) saat pengaturan berubah.
-- [ ] Download SVG + salin kode SVG ke clipboard.
-- [ ] Penanganan error: format tak didukung, gambar terlalu besar (auto-resize dengan pemberitahuan).
+- [x] Upload via drag-and-drop, file picker, dan paste dari clipboard.
+- [ ] Preview berdampingan **sebelum/sesudah** dengan zoom & pan. *(berdampingan ✅, zoom & pan belum)*
+- [x] Panel pengaturan dasar: jumlah warna, detail/smoothing, mode (warna / hitam-putih).
+- [x] Re-trace otomatis (debounced) saat pengaturan berubah.
+- [x] Download SVG + salin kode SVG ke clipboard.
+- [x] Penanganan error: format tak didukung, gambar terlalu besar (auto-resize dengan pemberitahuan).
 - [ ] Deploy publik pertama.
 
 **Selesai jika:** orang lain bisa membuka URL, mengonversi logonya sendiri, dan mengunduh SVG tanpa penjelasan apa pun.
