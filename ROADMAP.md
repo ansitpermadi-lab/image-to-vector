@@ -76,7 +76,7 @@ Tujuan: dari "jalan" menjadi "bagus".
 - [ ] Preset sekali-klik: **Logo**, **Sketsa/Line-art**, **Ilustrasi**, **Foto (poster)**.
 - [ ] Pra-pemrosesan: kuantisasi warna, denoise ringan, opsi hapus background warna solid.
 - [ ] Optimasi output SVG (SVGO): ukuran file kecil, path digabung per warna.
-- [ ] Batch: beberapa gambar sekaligus → download ZIP.
+- [x] Batch: beberapa gambar sekaligus → download ZIP. *(dimajukan atas permintaan — selesai lebih awal)*
 - [ ] Ekspor tambahan: PNG hasil render ulang pada resolusi berapa pun.
 - [ ] Perbandingan ukuran file & jumlah path di UI.
 
